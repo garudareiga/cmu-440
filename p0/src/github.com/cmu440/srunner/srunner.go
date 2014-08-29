@@ -5,7 +5,10 @@ import (
 	"github.com/cmu440/p0"
 )
 
-const defaultPort = 9999
+const (
+	defaultHost = "localhost"
+	defaultPort = 9999
+)
 
 func main() {
 	// Initialize the server.

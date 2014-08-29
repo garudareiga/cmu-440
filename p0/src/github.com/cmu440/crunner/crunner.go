@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"os"
+	"strconv"
 )
 
 const (
@@ -15,5 +18,22 @@ const (
 // read and print out the server's echoed response to standard output. Whether or
 // not you add any code to this file will not affect your grade.
 func main() {
-	fmt.Println("Not implemented.")
+	conn, err := net.Dial("tcp", defaultHost + ":" + strconv.Itoa(defaultPort))
+	if err != nil {
+		fmt.Println("Error on dial: ", err)
+		os.Exit(-1)
+	}
+
+	fmt.Println("Write once to connection")
+	buf := []byte("Hello!") 
+	n, err := conn.Write(buf)
+	if err != nil {
+		fmt.Println("Error on write: ", err)
+		os.Exit(-1)
+	}
+
+	fmt.Println("Write ", buf[:n])
+
+	conn.Close()
+	//fmt.Println("Not implemented.")
 }
