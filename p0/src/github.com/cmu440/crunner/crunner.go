@@ -5,6 +5,8 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"bufio"
+	"strings"
 )
 
 const (
@@ -24,16 +26,49 @@ func main() {
 		os.Exit(-1)
 	}
 
-	fmt.Println("Write once to connection")
-	buf := []byte("Hello!") 
-	n, err := conn.Write(buf)
-	if err != nil {
-		fmt.Println("Error on write: ", err)
-		os.Exit(-1)
+	ch := make(chan string)
+
+	// handle outbound message
+	go func(conn net.Conn, ch <-chan string) {
+		b := bufio.NewWriter(conn)
+		for {
+			select {
+			case msg := <- ch:
+				_, err := b.WriteString(msg + "\n")
+				b.Flush()
+				if err != nil {
+					fmt.Println("Error on write: ", err)
+					os.Exit(-1)
+				}	
+				fmt.Println("Write " + msg + " to connection")
+			}
+		}
+	}(conn, ch)
+
+	// handle inbound message
+	go func(conn net.Conn) {
+		b := bufio.NewReader(conn)
+		for {
+			line, err := b.ReadString('\n')
+			if err != nil {
+				break
+			}
+			fmt.Println("Echo back: ", strings.TrimRight(string(line), "\n"))
+		}
+	}(conn)
+
+	for {
+		var input string
+		fmt.Scanln(&input)	
+
+		if input == "done" {
+			break
+		}	
+
+		ch <- input
 	}
 
-	fmt.Println("Write ", buf[:n])
-
 	conn.Close()
+	fmt.Println("done")
 	//fmt.Println("Not implemented.")
 }
