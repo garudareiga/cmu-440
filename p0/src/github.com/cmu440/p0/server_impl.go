@@ -10,14 +10,15 @@ import (
 
 type multiEchoServer struct {
 	// TODO: implement this!
-	host string
+	host     string
+	clientId int
 }
 
 // New creates and returns (but does not start) a new MultiEchoServer.
 func New() MultiEchoServer {
 	// TODO: implement this!
 	//return nil
-	ptrServer := &multiEchoServer{ host:"localhost" }
+	ptrServer := &multiEchoServer{host: "localhost"}
 	return MultiEchoServer(ptrServer)
 }
 
@@ -29,16 +30,21 @@ func (mes *multiEchoServer) Start(port int) error {
 		os.Exit(-1)
 	}
 
+	msgchan := make(chan string) // Message channel
+	addchan := make(chan Client) // Add-Client channel
+	delchan := make(chan Client) // Del-Client channel
+
+	go onMessage()
+
 	for {
 		fmt.Println("Waiting for a connection via Accept")
 		conn, err := ln.Accept()
 		if err != nil {
 			fmt.Println("Error on accept: ", err)
-			os.Exit(-1)
+			continue
 		}
 
-		myconn := &myConn { conn:conn, prefix:"Server" }
-		go handleRequest(myconn)
+		go onConnection(conn, msgchan)
 	}
 	return nil
 }
@@ -53,21 +59,64 @@ func (mes *multiEchoServer) Count() int {
 }
 
 // TODO: add additional methods/functions below!
-type myConn struct {
+type Client struct {
 	conn net.Conn
-	prefix string
+	ch   <-chan string
 }
 
-func handleRequest(myconn *myConn) {
-	fmt.Println("Reading once from connection")
+func onMessage(msgchan <-chan string, addchan <-chan Client, delchan <-chan Client) {
+	clmap := make(map[net.Conn]chan<- string)
 
-	var buf [1024]byte
-	n, err := myconn.conn.Read(buf[:])
-	if err != nil {
-		fmt.Println("Error on read: ", err)
-		os.Exit(-1)
+	for {
+		select {
+		case msg := <-msgchan:
+			fmt.Printf("New echo message: " + msg)
+			for _, ch := range clmap {
+				// go func(mch chan<- string) { mch <- msg }();
+				ch <- msg
+			}
+		case client := <-addchan:
+			fmt.Printf("New connection: " + client.conn)
+			clmap[client.conn] = client.ch
+		case client := <-delchan:
+			fmt.Printf("Lost connection: " + client.conn)
+			delete(clmap, client.conn)
+		}
 	}
-	
-	fmt.Println(myconn.prefix, ":", string(buf[0:n]))
-	//myconn.conn.Close()
+}
+
+func onConnection(s net.Conn, msgchan chan<- string, addchan chan<- Client, delchan chan<- Client) {
+	defer s.Close()
+
+	fmt.Printf("%d: %v <-> %v\n", i, s.LocalAddr(), s.RemoteAddr())
+
+	client := Client{conn: s, ch: make(chan string)}
+	addchan <- client
+
+	go onEcho(client.conn, client.ch)
+
+	b := bufio.NewReader(s)
+	for {
+		//line, e := b.ReadBytes('\n')
+		line, e := b.ReadString('\n')
+		if e != nil {
+			break
+		}
+		msgchan <- line
+		//s.Write(line)
+	}
+
+	delchan <- client
+	fmt.Printf("%d: closed\n", i)
+}
+
+func onEcho(s net.Conn, ch <-chan string) {
+	b := bufio.NewWriter(s)
+	for {
+		msg <- ch
+		_, err := b.WriteString(msg)
+		if err != nil {
+			break
+		}
+	}
 }
