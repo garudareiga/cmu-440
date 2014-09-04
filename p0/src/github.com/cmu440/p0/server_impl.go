@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	//"strings"
 )
 
 type echoClient struct {
@@ -18,21 +17,19 @@ type echoClient struct {
 type multiEchoServer struct {
 	// TODO: implement this!
 	host    string
-	clients map[int]*echoClient // Id -> Client
+	eclChan chan map[int]*echoClient
 }
 
 // New creates and returns (but does not start) a new MultiEchoServer.
 func New() MultiEchoServer {
-	// TODO: implement this!
 	ptrServer := &multiEchoServer{
 		host:    "localhost",
-		clients: make(map[int]*echoClient),
+		eclChan: make(chan map[int]*echoClient, 1),
 	}
 	return MultiEchoServer(ptrServer)
 }
 
 func (mes *multiEchoServer) Start(port int) error {
-	// TODO: implement this!
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port)) // create a server
 	if err != nil {
 		fmt.Println("Error on listen: ", err)
@@ -40,30 +37,31 @@ func (mes *multiEchoServer) Start(port int) error {
 	}
 	fmt.Printf("Server is running at %s:%d\n", mes.host, port)
 
-	go handleServer(ln, mes.clients)
+	go handleServer(ln, mes.eclChan)
 
 	return nil
 }
 
 func (mes *multiEchoServer) Close() {
-	// TODO: implement this!
-	for _, c := range mes.clients {
-		c.conn.Close()
+	for _, client := range <-mes.eclChan {
+		client.conn.Close()
 	}
 }
 
 func (mes *multiEchoServer) Count() int {
-	// TODO: implement this!
-	return len(mes.clients)
+	clients := <-mes.eclChan
+	count := len(clients)
+	mes.eclChan <- clients
+	return count
 }
 
 // TODO: add additional methods/functions below!
-func handleServer(ln net.Listener, clients map[int]*echoClient) {
-	//eclChan := make(chan map[int]*echoClient, 1)
-	//eclChan <- clients
-
+func handleServer(ln net.Listener, eclChan chan map[int]*echoClient) {
 	msgChan := make(chan string)
-	go handleMessage(msgChan, clients)
+	go handleMessage(msgChan, eclChan)
+
+	clients := make(map[int]*echoClient)
+	eclChan <- clients
 
 	i := 0
 	for {
@@ -73,15 +71,12 @@ func handleServer(ln net.Listener, clients map[int]*echoClient) {
 			continue
 		}
 
-		//go handleConnection(i, conn, eclChan)
-		go handleConnection(i, conn, clients, msgChan)
+		go handleConnection(i, conn, eclChan, msgChan)
 		i++
 	}
 }
 
-//func handleConnection(i int, conn net.Conn, clients map[int]*echoClient) {
-//func handleConnection(i int, conn net.Conn, eclChan chan map[int]*echoClient) {
-func handleConnection(i int, conn net.Conn, clients map[int]*echoClient, msgChan chan<- string) {
+func handleConnection(i int, conn net.Conn, eclChan chan map[int]*echoClient, msgChan chan<- string) {
 	fmt.Printf("Client %d: %v <-> %v\n", i, conn.LocalAddr(), conn.RemoteAddr())
 
 	ptrEchoClient := &echoClient{
@@ -89,9 +84,9 @@ func handleConnection(i int, conn net.Conn, clients map[int]*echoClient, msgChan
 		ch:   make(chan string, 100),
 	}
 
-	//clients := <-eclChan
+	clients := <-eclChan
 	clients[i] = ptrEchoClient
-	//eclChan <- clients
+	eclChan <- clients
 
 	go echo(ptrEchoClient)
 	defer ptrEchoClient.conn.Close()
@@ -103,13 +98,11 @@ func handleConnection(i int, conn net.Conn, clients map[int]*echoClient, msgChan
 			break
 		}
 		msgChan <- msg
-		//clients = <-eclChan
-		//eclChan <- clients
 	}
 
-	//clients = <-eclChan
+	clients = <-eclChan
 	delete(clients, i)
-	//eclChan <- clients
+	eclChan <- clients
 	fmt.Printf("%d: closed\n", i)
 }
 
@@ -123,14 +116,16 @@ func echo(client *echoClient) {
 	}
 }
 
-func handleMessage(msgChan <-chan string, clients map[int]*echoClient) {
+func handleMessage(msgChan <-chan string, eclChan chan map[int]*echoClient) {
 	for {
 		msg := <-msgChan
+		clients := <-eclChan
 		for _, echoClient := range clients {
 			select {
 			case echoClient.ch <- msg:
-			default:
+			default: // discard value if channel is full
 			}
 		}
+		eclChan <- clients
 	}
 }
