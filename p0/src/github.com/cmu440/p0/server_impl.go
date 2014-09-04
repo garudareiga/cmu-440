@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"fmt"
 	"net"
-	"os"
 )
 
 type echoClient struct {
@@ -18,6 +17,8 @@ type multiEchoServer struct {
 	// TODO: implement this!
 	host    string
 	eclChan chan map[int]*echoClient
+	ln      net.Listener
+	stop    chan bool
 }
 
 // New creates and returns (but does not start) a new MultiEchoServer.
@@ -25,19 +26,21 @@ func New() MultiEchoServer {
 	ptrServer := &multiEchoServer{
 		host:    "localhost",
 		eclChan: make(chan map[int]*echoClient, 1),
+		stop:    make(chan bool),
 	}
 	return MultiEchoServer(ptrServer)
 }
 
 func (mes *multiEchoServer) Start(port int) error {
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port)) // create a server
+	mes.ln = ln
 	if err != nil {
 		fmt.Println("Error on listen: ", err)
-		os.Exit(-1)
+		return err
 	}
 	fmt.Printf("Server is running at %s:%d\n", mes.host, port)
 
-	go handleServer(ln, mes.eclChan)
+	go mes.serve()
 
 	return nil
 }
@@ -46,6 +49,8 @@ func (mes *multiEchoServer) Close() {
 	for _, client := range <-mes.eclChan {
 		client.conn.Close()
 	}
+	mes.ln.Close()
+	close(mes.stop)
 }
 
 func (mes *multiEchoServer) Count() int {
@@ -56,22 +61,27 @@ func (mes *multiEchoServer) Count() int {
 }
 
 // TODO: add additional methods/functions below!
-func handleServer(ln net.Listener, eclChan chan map[int]*echoClient) {
+func (mes *multiEchoServer) serve() {
 	msgChan := make(chan string)
-	go handleMessage(msgChan, eclChan)
+	go handleMessage(msgChan, mes.eclChan)
 
 	clients := make(map[int]*echoClient)
-	eclChan <- clients
+	mes.eclChan <- clients
 
 	i := 0
 	for {
-		conn, err := ln.Accept()
+		conn, err := mes.ln.Accept()
 		if err != nil {
+			select {
+			case <-mes.stop:
+				return
+			default:
+			}
 			fmt.Println("Error on accept: ", err)
 			continue
 		}
 
-		go handleConnection(i, conn, eclChan, msgChan)
+		go handleConnection(i, conn, mes.eclChan, msgChan)
 		i++
 	}
 }
