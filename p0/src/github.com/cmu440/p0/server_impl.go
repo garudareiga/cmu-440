@@ -3,120 +3,134 @@
 package p0
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"os"
+	//"strings"
 )
+
+type echoClient struct {
+	conn net.Conn
+	ch   chan string
+}
 
 type multiEchoServer struct {
 	// TODO: implement this!
-	host     string
-	clientId int
+	host    string
+	clients map[int]*echoClient // Id -> Client
 }
 
 // New creates and returns (but does not start) a new MultiEchoServer.
 func New() MultiEchoServer {
 	// TODO: implement this!
-	//return nil
-	ptrServer := &multiEchoServer{host: "localhost"}
+	ptrServer := &multiEchoServer{
+		host:    "localhost",
+		clients: make(map[int]*echoClient),
+	}
 	return MultiEchoServer(ptrServer)
 }
 
 func (mes *multiEchoServer) Start(port int) error {
 	// TODO: implement this!
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port)) // create a server
 	if err != nil {
 		fmt.Println("Error on listen: ", err)
 		os.Exit(-1)
 	}
+	fmt.Printf("Server is running at %s:%d\n", mes.host, port)
 
-	msgchan := make(chan string) // Message channel
-	addchan := make(chan Client) // Add-Client channel
-	delchan := make(chan Client) // Del-Client channel
+	go handleServer(ln, mes.clients)
 
-	go onMessage()
+	return nil
+}
 
+func (mes *multiEchoServer) Close() {
+	// TODO: implement this!
+	for _, c := range mes.clients {
+		c.conn.Close()
+	}
+}
+
+func (mes *multiEchoServer) Count() int {
+	// TODO: implement this!
+	return len(mes.clients)
+}
+
+// TODO: add additional methods/functions below!
+func handleServer(ln net.Listener, clients map[int]*echoClient) {
+	//eclChan := make(chan map[int]*echoClient, 1)
+	//eclChan <- clients
+
+	msgChan := make(chan string)
+	go handleMessage(msgChan, clients)
+
+	i := 0
 	for {
-		fmt.Println("Waiting for a connection via Accept")
 		conn, err := ln.Accept()
 		if err != nil {
 			fmt.Println("Error on accept: ", err)
 			continue
 		}
 
-		go onConnection(conn, msgchan)
-	}
-	return nil
-}
-
-func (mes *multiEchoServer) Close() {
-	// TODO: implement this!
-}
-
-func (mes *multiEchoServer) Count() int {
-	// TODO: implement this!
-	return -1
-}
-
-// TODO: add additional methods/functions below!
-type Client struct {
-	conn net.Conn
-	ch   <-chan string
-}
-
-func onMessage(msgchan <-chan string, addchan <-chan Client, delchan <-chan Client) {
-	clmap := make(map[net.Conn]chan<- string)
-
-	for {
-		select {
-		case msg := <-msgchan:
-			fmt.Printf("New echo message: " + msg)
-			for _, ch := range clmap {
-				// go func(mch chan<- string) { mch <- msg }();
-				ch <- msg
-			}
-		case client := <-addchan:
-			fmt.Printf("New connection: " + client.conn)
-			clmap[client.conn] = client.ch
-		case client := <-delchan:
-			fmt.Printf("Lost connection: " + client.conn)
-			delete(clmap, client.conn)
-		}
+		//go handleConnection(i, conn, eclChan)
+		go handleConnection(i, conn, clients, msgChan)
+		i++
 	}
 }
 
-func onConnection(s net.Conn, msgchan chan<- string, addchan chan<- Client, delchan chan<- Client) {
-	defer s.Close()
+//func handleConnection(i int, conn net.Conn, clients map[int]*echoClient) {
+//func handleConnection(i int, conn net.Conn, eclChan chan map[int]*echoClient) {
+func handleConnection(i int, conn net.Conn, clients map[int]*echoClient, msgChan chan<- string) {
+	fmt.Printf("Client %d: %v <-> %v\n", i, conn.LocalAddr(), conn.RemoteAddr())
 
-	fmt.Printf("%d: %v <-> %v\n", i, s.LocalAddr(), s.RemoteAddr())
+	ptrEchoClient := &echoClient{
+		conn: conn,
+		ch:   make(chan string, 100),
+	}
 
-	client := Client{conn: s, ch: make(chan string)}
-	addchan <- client
+	//clients := <-eclChan
+	clients[i] = ptrEchoClient
+	//eclChan <- clients
 
-	go onEcho(client.conn, client.ch)
+	go echo(ptrEchoClient)
+	defer ptrEchoClient.conn.Close()
 
-	b := bufio.NewReader(s)
+	rb := bufio.NewReader(conn)
 	for {
-		//line, e := b.ReadBytes('\n')
-		line, e := b.ReadString('\n')
+		msg, e := rb.ReadString('\n')
 		if e != nil {
 			break
 		}
-		msgchan <- line
-		//s.Write(line)
+		msgChan <- msg
+		//clients = <-eclChan
+		//eclChan <- clients
 	}
 
-	delchan <- client
+	//clients = <-eclChan
+	delete(clients, i)
+	//eclChan <- clients
 	fmt.Printf("%d: closed\n", i)
 }
 
-func onEcho(s net.Conn, ch <-chan string) {
-	b := bufio.NewWriter(s)
+func echo(client *echoClient) {
 	for {
-		msg <- ch
-		_, err := b.WriteString(msg)
+		msg := <-client.ch
+		_, err := client.conn.Write([]byte(msg))
 		if err != nil {
 			break
+		}
+	}
+}
+
+func handleMessage(msgChan <-chan string, clients map[int]*echoClient) {
+	for {
+		msg := <-msgChan
+		for _, echoClient := range clients {
+			select {
+			case echoClient.ch <- msg:
+			default:
+			}
 		}
 	}
 }
