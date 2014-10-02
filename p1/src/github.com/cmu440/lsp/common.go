@@ -1,17 +1,16 @@
 package lsp
 
 import (
-	"github.com/cmu440/lspnet"
-	"sync"
+//	"sync"
 )
 
 type Activity struct {
-	msg  *Message
-	sig  chan struct{}
-	done bool
+	message *Message
+	signal  chan struct{}
+	done    bool
 }
 
-type SafeNum struct {
-	sync.Mutex
-	n int
+type SlideWindow struct {
+	seqNumLower int
+	seqNumUpper int
 }
